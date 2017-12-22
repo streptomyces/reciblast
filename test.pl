@@ -8,14 +8,10 @@ use Sco::Common qw(tablist linelist tablistE linelistE tabhash tabhashE tabvals
     tablistV tablistVE linelistV linelistVE tablistH linelistH
     tablistER tablistVER linelistER linelistVER tabhashER tabhashVER csvsplit);
 use File::Spec;
-use File::Copy;
 use Bio::SeqIO;
 use Sco::Genbank;
-use Sco::Blast;
-use DBI;
 use File::Temp qw(tempfile tempdir);
-use Bio::DB::Fasta;
-
+my $scogbk = Sco::Genbank->new();
 
 # {{{ Getopt::Long
 use Getopt::Long;
@@ -25,20 +21,14 @@ my $fofn;
 my $outex; # extension for the output filename when it is derived on infilename.
 my $conffile = qq(local.conf);
 my $errfile;
-my $paraflag;
-my $outfaa;
 my $runfile;
 my $outfile;
-my $queryfile = qq(bldc.faa);
 my $testCnt = 0;
 our $verbose;
 my $skip = 0;
 my $help;
 GetOptions (
 "outfile:s" => \$outfile,
-"queryfile:s" => \$queryfile,
-"paraflag:i" => \$paraflag,
-"outfaa:s" => \$outfaa,
 "outdir:s" => \$outdir,
 "indir:s" => \$indir,
 "fofn:s" => \$fofn,
@@ -123,11 +113,14 @@ exec("perldoc $0");
 exit;
 }
 
-my $tempdir = qw(/home/sco/volatile);
-my $template="reciblXXXXX";
-
-my $scogbk = Sco::Genbank->new();
-my $scobl = Sco::Blast->new();
+# {{{ open the errfile
+if($errfile) {
+open(ERRH, ">", $errfile);
+print(ERRH "$0", "\n");
+close(STDERR);
+open(STDERR, ">&ERRH"); 
+}
+# }}}
 
 # {{{ Populate %conf if a configuration file 
 my %conf;
@@ -149,18 +142,6 @@ linelistE("Specified configuration file $conffile not found.");
 }
 # }}}
 
-my $handle=DBI->connect("DBI:Pg:dbname=$conf{dbname};host=$conf{dbhost}",
-$conf{dbuser}, $conf{dbpass});
-
-# {{{ open the errfile
-if($errfile) {
-open(ERRH, ">", $errfile);
-print(ERRH "$0", "\n");
-close(STDERR);
-open(STDERR, ">&ERRH"); 
-}
-# }}}
-
 # {{{ Outdir and outfile business.
 my $ofh;
 my $idofn = 0;    # Flag for input filename derived output filenames. 
@@ -172,10 +153,10 @@ if($outfile) {
         croak("Failed to make $outdir. Exiting.");
       }
     }
-    $ofn = File::Spec->catfile($outdir, $outfile . "_" . $paraflag);
+    $ofn = File::Spec->catfile($outdir, $outfile);
   }
   else {
-    $ofn = $outfile . "_" . $paraflag;
+    $ofn = $outfile;
   }
   open($ofh, ">", $ofn);
 }
@@ -220,125 +201,28 @@ else {
 
 # }}}
 
-my $qstr = qq/select accession, organism, lineage from $conf{table}/;
-$qstr .= qq/ where paraflag = $paraflag/;
-# $qstr .= qq/ and lineage ~* 'streptomyces'/;
-# $qstr .= qq/ and lineage ~* 'catenulispora'/;
-# if($testCnt) {
-# }
-#           $acc, $org, $hr->{hname}, $hr->{hlen}, $hr->{fracid},
-#           $hr->{qcov}, $hr->{hcov}, $hr->{signif},
-#           $desc, $lineage
-
-my ($qname, $qlen) = query_length($queryfile);
-
-tablist("#Accession", "Organism", "Qname", "Qlen", "Hname", "Hlen",
-"Identity", "Qcov", "Hcov", "Expect", "Hdesc", "Hlineage"); 
-
-open(my $ofaa, ">", $outfaa . "_" . $paraflag);
-open(my $failh, ">", "Failed_" . $paraflag);
-
-my $seqout=Bio::SeqIO->new(-fh => $ofaa, -format => 'fasta');
-
-my $stmt=$handle->prepare($qstr);
-$stmt->execute();
-my $serial = 0;
-my $accCnt = 0;
-while(my $hr=$stmt->fetchrow_hashref()) {
-my $acc = $hr->{accession};
-my $org = $hr->{organism};
-my $lineage = $hr->{lineage};
-my $accnover = $acc; $accnover =~ s/\.\d+$//;
-my $glob = $conf{gbkdir} . "/" . $accnover . "*";
-my @files = glob($glob);
-
-unless(@files) { next; }
-$serial += 1;
-tablistE($acc, $org, $serial, @files);
-
-my($tmpfh, $tmpfn)=tempfile($template, DIR => $tempdir, SUFFIX => '');
+my $template="reciblXXXXX";
+my $org = "Streptomyces coelicolor";
+my $acc = "AL645882";
+my($tmpfh, $tmpfn)=tempfile($template, DIR => "./temp", SUFFIX => '');
 close($tmpfh);
-my($tmpfh1, $tmpfn1)=tempfile($template, DIR => $tempdir, SUFFIX => '.faa');
+my($tmpfh1, $tmpfn1)=tempfile($template, DIR => "./temp", SUFFIX => '.faa');
 close($tmpfh1);
-my(@blpmade) =$scogbk->genbank2blastpDB(files => [@files],
+my(@blpmade) =$scogbk->genbank2blastpDB(files => [@infiles],
 name => $tmpfn, title => $org . " " . $acc, faafn => $tmpfn1);
-unless(@blpmade) {
-unlink($tmpfn);
-unlink($tmpfn1);
-tablistH($failh, $acc, $org);
-next;
-}
-
-
-my $biodb = Bio::DB::Fasta->new($tmpfn1); # may be a dir with several fasta files
-
-# blastp (hash(query, db, expect, outfh, threads, naln, ndesc, outfmt)).
-
-my($blfh, $blfn)=tempfile($template, DIR => $tempdir, SUFFIX => '.blast');
-my $blastp = $scobl->blastp(query => $queryfile, db => $tmpfn, expect => 1e-3,
-outfh => $blfh);
-close($blfh);
-
-my @hh = $scobl->hspHashes($blfn, "blast");
-
-# hspHashes (blastOutputFileName, format) returns(list of hashes(qname, hname, qlen, hlen, signif, bit hdesc, qcover, hcover, hstrand) );
-
-for my $hr (@hh) {
-  if(ref($hr)) {
-      my $hname = $hr->{hname};
-      my $desc = $biodb->header($hr->{hname});
-      tablist(
-          $acc, $org, $qname, $qlen, $hr->{hname}, $hr->{hlen}, $hr->{fracid},
-          $hr->{qcov}, $hr->{hcov}, $hr->{signif},
-          $desc, $lineage
-          );
-      my $hitstr = $biodb->seq($hr->{hname});
-      my $outobj = Bio::Seq->new(-seq => $hitstr);
-      $outobj->display_id($hr->{hname});
-      $desc =~ s/^$hname//;
-      $outobj->description($desc . " " . $org);
-      $seqout->write_seq($outobj);
-  }
-}
-
-
-# copy($blfn, "lastblast");
-unlink($blfn);
-unlink(glob("$tmpfn*"));
-unlink(glob("$tmpfn1*"));
-
-$accCnt += 1;
-if($testCnt and $accCnt >= $testCnt) { last; }
-
-unless($accCnt % 100) {
-linelistE($accCnt);
-}
-
-
-}
-
-$stmt->finish();
 
 exit;
 
 # Multiple END blocks run in reverse order of definition.
 END {
 close($ofh);
-close($ofaa);
-close($failh);
 close(STDERR);
 close(ERRH);
-$handle->disconnect();
+# $handle->disconnect();
 }
 
 
-sub query_length {
-my $seqio = Bio::SeqIO->new(-file => shift(@_));
-my $seqobj = $seqio->next_seq();
-my $name = $seqobj->display_id();
-return($name, $seqobj->length());
-}
 
 
-__END__
+
 
