@@ -26,8 +26,11 @@ my $outex; # extension for the output filename when it is derived on infilename.
 my $conffile = qq(local.conf);
 my $errfile;
 my $paraflag;
+my $threads = 12;
+my $jobserial;
 my $outfaa;
 my $runfile;
+my $table;
 my $outfile;
 my $queryfile = qq(bldc.faa);
 my $testCnt = 0;
@@ -37,7 +40,9 @@ my $help;
 GetOptions (
 "outfile:s" => \$outfile,
 "queryfile:s" => \$queryfile,
-"paraflag:i" => \$paraflag,
+"table:s" => \$table,
+"threads:i" => \$threads,
+"jobserial:i" => \$jobserial,
 "outfaa:s" => \$outfaa,
 "outdir:s" => \$outdir,
 "indir:s" => \$indir,
@@ -161,6 +166,8 @@ open(STDERR, ">&ERRH");
 }
 # }}}
 
+$paraflag = $jobserial;
+
 # {{{ Outdir and outfile business.
 my $ofh;
 my $idofn = 0;    # Flag for input filename derived output filenames. 
@@ -220,15 +227,15 @@ else {
 
 # }}}
 
-my $qstr = qq/select accession, organism, lineage from $conf{table}/;
-$qstr .= qq/ where paraflag = $paraflag/;
-# $qstr .= qq/ and lineage ~* 'streptomyces'/;
-# $qstr .= qq/ and lineage ~* 'catenulispora'/;
-# if($testCnt) {
-# }
-#           $acc, $org, $hr->{hname}, $hr->{hlen}, $hr->{fracid},
-#           $hr->{qcov}, $hr->{hcov}, $hr->{signif},
-#           $desc, $lineage
+
+unless($table) {
+  $table = $conf{table};
+}
+
+my $qstr = qq/select accession, organism, lineage from $table/;
+$qstr .= qq/ where organism ~ 'Streptomyces'/;
+# $qstr .= qq/ and paracat = 199/;
+$qstr .= qq/ and paracat % $threads = $jobserial/;
 
 my ($qname, $qlen) = query_length($queryfile);
 
@@ -261,7 +268,7 @@ close($tmpfh);
 my($tmpfh1, $tmpfn1)=tempfile($template, DIR => $tempdir, SUFFIX => '.faa');
 close($tmpfh1);
 my(@blpmade) =$scogbk->genbank2blastpDB(files => [@files],
-name => $tmpfn, title => $org . " " . $acc, faafn => $tmpfn1);
+name => $tmpfn, title => $org . " " . $acc, faafn => $tmpfn1, locinfo => 1);
 unless(@blpmade) {
 unlink($tmpfn);
 unlink($tmpfn1);
