@@ -28,7 +28,7 @@ GetOptions (
 "outfile:s" => \$outfile,
 "dirout:s" => \$outdir,
 "indir:s" => \$indir,
-"family" => \$family,
+"family:s" => \$family,
 "extension:s" => \$outex,
 "conffile:s" => \$conffile,
 "errfile:s" => \$errfile,
@@ -103,7 +103,6 @@ if(-s $conffile ) {
     $keyCnt += 1;
   }
   close($cnfh);
-  linelistE("$keyCnt keys placed in conf.");
 }
 elsif($conffile ne "local.conf") {
 linelistE("Specified configuration file $conffile not found.");
@@ -190,12 +189,12 @@ for my $infile (@infiles) {
     chomp($line);
     if($line=~m/^\s*\#/ or $line=~m/^\s*$/) {next;}
     my @ll=split(/\t/, $line);
-    if($ll[0] =~ m/^Streptomyces/) {
+    if($ll[3] =~ m/$family/) {
     push(@{$lol[$cycle]}, $ll[0]);
     $loh[$cycle]->{$ll[0]} += 1;
     push(@{$acc{$ll[0]}}, $ll[2]);
     }
-    elsif($ll[1] =~ m/^Streptomyces/) {
+    elsif($ll[11] =~ m/$family/) {
     push(@{$lol[$cycle]}, $ll[1]);
     $loh[$cycle]->{$ll[1]} += 1;
     }

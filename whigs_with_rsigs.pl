@@ -8,22 +8,21 @@ use Sco::Common qw(tablist linelist tablistE linelistE tabhash tabhashE tabvals
     tablistV tablistVE linelistV linelistVE tablistH linelistH
     tablistER tablistVER linelistER linelistVER tabhashER tabhashVER csvsplit);
 use File::Spec;
-use IO::Uncompress::Gunzip qw(gunzip $GunzipError) ;
-use File::Temp qw(tempfile tempdir);
-use DBI;
-
-my $tempdir = qq(/mnt/volatile);
-my $template = qq(gunzippedXXXXX);
+use Sco::Global;
+use Bio::SeqIO;
+use Bio::DB::Fasta;
+my $slob = Sco::Global->new();
 
 # {{{ Getopt::Long
 use Getopt::Long;
 my $outdir;
 my $indir;
-my $fofn;
 my $outex; # extension for the output filename when it is derived on infilename.
 my $conffile = qq(local.conf);
+my $fofn;
 my $errfile;
 my $runfile;
+my $fastafile;
 my $outfile;
 my $testCnt = 0;
 our $verbose;
@@ -33,7 +32,7 @@ GetOptions (
 "outfile:s" => \$outfile,
 "dirout:s" => \$outdir,
 "indir:s" => \$indir,
-"fofn:s" => \$fofn,
+"fastafile:s" => \$fastafile,
 "extension:s" => \$outex,
 "conffile:s" => \$conffile,
 "errfile:s" => \$errfile,
@@ -57,7 +56,11 @@ GetOptions (
 
 ~~~ {.sh}
 
-perl script.pl -outfile outfn -- infile1 infile2 infile3 ...
+perl code/whigs_with_rsigs.pl \
+-fasta work_whig/top_whig.faa \
+-outfile whigs_with_rsigs.faa \
+-- work_whig/list_rsiG_homologs.csv work_whig/whig_tophits.csv
+#;
 
 ~~~
 
@@ -173,49 +176,86 @@ else {
 
 # }}}
 
-my $handle = DBI->connect("DBI:Pg:dbname = $conf{dbname};host = $conf{dbhost}",
-$conf{dbuser}, $conf{dbpass});
 
-
-# {{{ Cycle through all the infiles.
-my $fileCnt = 0;
-for my $inacc (@infiles) {
-  my @globfn = glob("refrepgbk/" . $inacc . "*");
-
-  for my $infile (@globfn) {
-    my($gbfh, $gbfn)=tempfile($template, DIR => $tempdir, SUFFIX => '.gbff');
-    unless(gunzip $infile => $gbfh, AutoClose => 1) {
-      close($gbfh); unlink($gbfn);
-      die "gunzip failed: $GunzipError\n";
-    }
-
-    $fileCnt += 1;
-    open(my $ifh, "<$gbfn") or croak("Could not open $gbfn");
-    my $lineCnt = 0;
-    if($skip) {
-      for (1..$skip) { my $discard = readline($ifh); }
-    }
-    my ($acc, $organism) = organism($infile);
-    my $cdsflag = 0;
-    while(my $line = readline($ifh)) {
-      chomp($line);
-      if($line =~ m/\s{2,}CDS\s{2,}/) {
-        tablist($fileCnt, $acc, $organism, "has at least one CDS");
-        $cdsflag = 1;
-        last;
-      }
-      $lineCnt += 1;
-      if($testCnt and $lineCnt >= $testCnt) { last; }
-      if($runfile and (not -e $runfile)) { last; }
-    }
-    unless($cdsflag) {
-      tablist($fileCnt, $acc, $organism, "has no CDSs");
-    }
-    close($ifh);
-    unlink($gbfn);
-  }
+my @organisms;
+# {{{
+my $infile = shift(@infiles);
+my ($noex, $dir, $ext)= fileparse($infile, qr/\.[^.]*/);
+my $bn = $noex . $ext;
+$skip = 1;
+open(my $ifh, "<$infile") or croak("Could not open $infile");
+my $lineCnt = 0;
+if($skip) {
+  for (1..$skip) { my $discard = readline($ifh); }
 }
+# local $/ = ""; # For reading multiline records separated by blank lines.
+while(my $line = readline($ifh)) {
+  chomp($line);
+  if($line=~m/^\s*\#/ or $line=~m/^\s*$/) {next;}
+  my @ll=split(/\t/, $line);
+  push(@organisms, $ll[0]);
+  $lineCnt += 1;
+  if($testCnt and $lineCnt >= $testCnt) { last; }
+  if($runfile and (not -e $runfile)) { last; }
+}
+close($ifh);
 # }}}
+
+# linelist(@organisms);
+
+my $db = Bio::DB::Fasta->new($fastafile); # may be a dir with several fasta files
+my $seqout=Bio::SeqIO->new(-fh => $ofh, -format => 'fasta');
+
+
+# {{{
+my @found;
+my %acc;
+$infile = shift(@infiles);
+($noex, $dir, $ext)= fileparse($infile, qr/\.[^.]*/);
+$bn = $noex . $ext;
+open($ifh, "<$infile") or croak("Could not open $infile");
+$lineCnt = 0;
+if($skip) {
+  for (1..$skip) { my $discard = readline($ifh); }
+}
+# local $/ = ""; # For reading multiline records separated by blank lines.
+while(my $line = readline($ifh)) {
+  chomp($line);
+  if($line=~m/^\s*\#/ or $line=~m/^\s*$/) {next;}
+  my @ll=split(/\t/, $line);
+  my $name = $ll[1];
+  my $hname = $ll[4];
+  for my $org (@organisms) {
+    if($name eq $org) {
+      if(exists($acc{$hname})) {
+        $acc{$hname} += 1;
+      }
+      else {
+      my $seqobj = $db->get_Seq_by_id($hname);
+      $seqout->write_seq($seqobj);
+      $acc{$hname} += 1;
+      # linelistE($line, $seqid);
+      push(@found, $org);
+      }
+    }
+  }
+  $lineCnt += 1;
+  if($testCnt and $lineCnt >= $testCnt) { last; }
+  if($runfile and (not -e $runfile)) { last; }
+}
+close($ifh);
+# }}}
+
+my($comref, $u1, $u2) = $slob->listCompare(\@organisms, \@found);
+linelistE(@{$u1});
+linelistE(@{$u2});
+
+for my $seqid (keys(%acc)) {
+if($acc{$seqid} > 1) {
+tablistE($seqid, $acc{$seqid});
+}
+}
+
 
 exit;
 
@@ -224,18 +264,8 @@ END {
 close($ofh);
 close(STDERR);
 close(ERRH);
-$handle->disconnect();
+# $handle->disconnect();
 }
-
-sub organism {
-my $ifn = shift(@_);
-my ($noex, $dir, $ext)= fileparse($ifn, qr/\.[^.]*/);
-my ($acc) = $noex =~ m/(^.*?\.\d)/;
-my $qstr = qq/select organism from $conf{table} where accession = '$acc'/;
-my ($organism) = $handle->selectrow_array($qstr);
-return($acc, $organism);
-}
-
 
 __END__
 

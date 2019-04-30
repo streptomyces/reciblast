@@ -239,9 +239,60 @@ Need to compare the Streptomyces species in work_amfc/amfc_tophits.csv
 and searchset.csv
 
 ~~~ 
-perl code/has_cds.pl -- \
+perl code/has_cds.pl -outfile kelley_2019_04_29.csv -- \
 $(perl code/file_compare.pl -- searchset.csv work_amfc/amfc_tophits.csv)
+
+cp kelley_2019_04_29.csv ~/mnt/wstemp/kelley/
 ~~~
 
+### Tue 30 Apr 2019
+
+~~~ 
+
+famcmp () {
+for family in $(cat families); do
+echo $family;
+perl code/has_cds.pl -- \
+$(perl code/file_compare.pl -fam $family \
+-- searchset.csv work_amfc/amfc_tophits.csv)
+done
+}
+
+famcmp > list_compare_cds.csv
+cp list_compare_cds.csv ~/mnt/wstemp/kelley/
+
+~~~
+
+Kelley's email of 30 April 2019.
+
+> Heya Govind!
+> 
+> 
+> So, another thing I am interested in looking at is if all RsiG homologs
+> are likely to interact with WhiG. Since the list of WhiG hits in bacteria
+> is a bit overwhelming, I thought it might be easier to just pull out these
+> sequences from strains with RsiG homologs and take a look at the
+> conservation of some key residues.
+> 
+> 
+> So, I have attached a list of strains that have RsiG homologs, and I was
+> wondering if it would be easy to pull out WhiG from this set of strains
+> from the list of top WhiG hits that you sent me previously (also
+> attached)? If it’s not super straightforward no worries, I can have a go
+> at it!
+> 
+> 
+> Hopefully this makes sense, let me know if you have any questions!
+> 
+> Kelley
+
+The script below has column numbers hardcoded in it.
+
+~~~ 
+perl code/whigs_with_rsigs.pl \
+-fasta work_whig/top_whig.faa \
+-outfile whigs_with_rsigs.faa \
+-- work_whig/list_rsiG_homologs.csv work_whig/whig_tophits.csv
+~~~
 
 
