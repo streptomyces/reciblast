@@ -295,4 +295,23 @@ perl code/whigs_with_rsigs.pl \
 -- work_whig/list_rsiG_homologs.csv work_whig/whig_tophits.csv
 ~~~
 
+### Wed 22 May 2019
+
+Need to find out which of the WhiG top hits are actually reciprocal.
+
+~~~ 
+cd /mnt/isilon/customers/kelley/2017_12_20/work_whig
+perl ../code/confirm_whig_reciprocal.pl -outfile \
+whig_tophits_reciprocal.csv -test 0 -- whig_tophits.csv
+cp whig_tophits_reciprocal.csv ~/mnt/wstemp/kelley/
+~~~
+
+Need to find out which of the AmfC top hits are actually reciprocal.
+
+~~~ 
+perl ../code/confirm_amfc_reciprocal.pl -outfile \
+amfc_tophits_reciprocal.csv -test 0 -- amfc_tophits.csv 
+cp amfc_tophits_reciprocal.csv ~/mnt/wstemp/kelley/
+~~~
+
 

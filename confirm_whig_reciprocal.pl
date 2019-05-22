@@ -8,13 +8,13 @@ use Sco::Common qw(tablist linelist tablistE linelistE tabhash tabhashE tabvals
     tablistV tablistVE linelistV linelistVE tablistH linelistH
     tablistER tablistVER linelistER linelistVER tabhashER tabhashVER csvsplit);
 use File::Spec;
-use IO::Uncompress::Gunzip qw(gunzip $GunzipError) ;
+use File::Copy;
 use File::Temp qw(tempfile tempdir);
-use DBI;
+use Sco::Blast;
+use Bio::DB::Fasta;
 
-my $tempdir = qq(/mnt/volatile);
-my $template = qq(gunzippedXXXXX);
-
+my $scobl = Sco::Blast->new();
+ 
 # {{{ Getopt::Long
 use Getopt::Long;
 my $outdir;
@@ -108,11 +108,18 @@ if(-s $conffile ) {
     $keyCnt += 1;
   }
   close($cnfh);
+  linelistE("$keyCnt keys placed in conf.");
 }
 elsif($conffile ne "local.conf") {
 linelistE("Specified configuration file $conffile not found.");
 }
 # }}}
+
+my $tempdir = qw(/mnt/volatile);
+my $template="kelleyXXXXX";
+if(exists($conf{template})) {
+  $template = $conf{template};
+}
 
 # {{{ outdir and outfile business.
 my $ofh;
@@ -173,47 +180,67 @@ else {
 
 # }}}
 
-my $handle = DBI->connect("DBI:Pg:dbname = $conf{dbname};host = $conf{dbhost}",
-$conf{dbuser}, $conf{dbpass});
-
+my $db = Bio::DB::Fasta->new("top_whig.faa"); # may be a dir with several fasta files
 
 # {{{ Cycle through all the infiles.
-my $fileCnt = 0;
-for my $inacc (@infiles) {
-  my @globfn = glob("refrepgbk/" . $inacc . "*");
+for my $infile (@infiles) {
+  my ($noex, $dir, $ext)= fileparse($infile, qr/\.[^.]*/);
+  my $bn = $noex . $ext;
+# tablistE($infile, $bn, $noex, $ext);
 
-  for my $infile (@globfn) {
-    my($gbfh, $gbfn)=tempfile($template, DIR => $tempdir, SUFFIX => '.gbff');
-    unless(gunzip $infile => $gbfh, AutoClose => 1) {
-      close($gbfh); unlink($gbfn);
-      die "gunzip failed: $GunzipError\n";
-    }
-
-    $fileCnt += 1;
-    open(my $ifh, "<$gbfn") or croak("Could not open $gbfn");
-    my $lineCnt = 0;
-    if($skip) {
-      for (1..$skip) { my $discard = readline($ifh); }
-    }
-    my ($acc, $organism) = organism($infile);
-    my $cdsflag = 0;
-    while(my $line = readline($ifh)) {
-      chomp($line);
-      if($line =~ m/\s{2,}CDS\s{2,}/) {
-        tablist($fileCnt, $acc, $organism, "has at least one CDS");
-        $cdsflag = 1;
-        last;
-      }
-      $lineCnt += 1;
-      if($testCnt and $lineCnt >= $testCnt) { last; }
-      if($runfile and (not -e $runfile)) { last; }
-    }
-    unless($cdsflag) {
-      tablist($fileCnt, $acc, $organism, "has no CDSs");
-    }
-    close($ifh);
-    unlink($gbfn);
+  if($idofn) {
+    my $ofn = File::Spec->catfile($outdir, $noex . "_out" . $outex);
+    open(OFH, ">", $ofn) or croak("Failed to open $ofn");
+    select(OFH);
   }
+
+  open(my $ifh, "<$infile") or croak("Could not open $infile");
+  my $lineCnt = 0;
+  if($skip) {
+    for (1..$skip) { my $discard = readline($ifh); }
+  }
+  my $header = readline($ifh); chomp($header);
+  my @header = split(/\t/, $header);
+  push(@header, "RevHit");
+  tablist(@header);
+
+  while(my $line = readline($ifh)) {
+    chomp($line);
+    if($line=~m/^\s*\#/ or $line=~m/^\s*$/) {next;}
+    my @ll=split(/\t/, $line);
+    my $id = $ll[4];
+    my $query = $db->get_Seq_by_id($id);
+
+
+    my($blofh, $blofn)=tempfile($template, DIR => $tempdir, SUFFIX => '.tmp');
+    $scobl->blastp(query => $query, db => qq(/mnt/isilon/blast_databases/vnz/vnz),
+        expect => 1e-6, outfh => $blofh);
+
+    my %tophit = $scobl->tophit($blofn);
+    my $reciprocal = $tophit{hname} eq 'vnz_26215' ? "WhiG" : $tophit{hname};
+
+#    tabhash(%tophit);
+    push(@ll, $reciprocal);
+    tablist(@ll);
+
+    $lineCnt += 1;
+    if($testCnt and $lineCnt >= $testCnt) { 
+      copy($blofn, "last.blast");
+      unlink($blofn);
+      last; 
+    }
+    if($runfile and (not -e $runfile)) {
+      copy($blofn, "last.blast");
+      unlink($blofn);
+      last; 
+    }
+    unlink($blofn);
+    unless($lineCnt % 30) {
+      linelistER("$lineCnt               ");
+    }
+  }
+  close($ifh);
+  close(OFH);
 }
 # }}}
 
@@ -224,18 +251,23 @@ END {
 close($ofh);
 close(STDERR);
 close(ERRH);
-$handle->disconnect();
+# $handle->disconnect();
 }
-
-sub organism {
-my $ifn = shift(@_);
-my ($noex, $dir, $ext)= fileparse($ifn, qr/\.[^.]*/);
-my ($acc) = $noex =~ m/(^.*?\.\d)/;
-my $qstr = qq/select organism from $conf{table} where accession = '$acc'/;
-my ($organism) = $handle->selectrow_array($qstr);
-return($acc, $organism);
-}
-
 
 __END__
+
+# {{{ For gzipped files.
+use IO::Uncompress::Gunzip qw(gunzip $GunzipError) ;
+use File::Temp qw(tempfile tempdir);
+my $tempdir = qq(/mnt/volatile);
+my $template = qq(gunzippedXXXXX);
+# Now you can use the gunzip function. AutoClose closes the file being
+# written to after all the writing has been done.
+
+my($gbfh, $gbfn)=tempfile($template, DIR => $tempdir, SUFFIX => '.gbff');
+unless(gunzip $infile => $gbfh, AutoClose => 1) {
+  close($gbfh); unlink($gbfn);
+  die "gunzip failed: $GunzipError\n";
+}
+# }}}
 
