@@ -1,5 +1,8 @@
 # Kelley
 
+Remember, RsiG and AmfC are the same.
+
+
 ### Thu 21 Dec 2017
 
      parawhig () {
@@ -313,5 +316,255 @@ perl ../code/confirm_amfc_reciprocal.pl -outfile \
 amfc_tophits_reciprocal.csv -test 0 -- amfc_tophits.csv 
 cp amfc_tophits_reciprocal.csv ~/mnt/wstemp/kelley/
 ~~~
+
+### Mon 03 Jun 2019
+
+Below, Mark's email to Kelley.
+
+> Hi Kelley
+> 
+> 
+> 
+> Can you come up with 2 numbers please:
+> 
+> 
+> 
+>  1. “In a search of ??? reference bacterial genomes available at GenBank
+>     (60 of which are Streptomyces genomes), we found a total of 132 rsiG
+>     homologs, all exclusively in members of the phylum Actinobacteria
+>     (Table S4).” How many reference bacterial genomes in total?
+>  2. “While whiH and whiI are present in all 326 complete and annotated
+>     Streptomyces genomes available at GenBank
+>     (https://www.ncbi.nlm.nih.gov/genbank/), homologs of vnz15005 are
+>     present in only ??%.”
+> 
+> 
+> 
+> Cheers!
+> 
+> Mark
+
+~~~ 
+grep -i 'streptomyces' searchset.csv > temp
+selectColumns.pl -col 2 temp > temp1
+
+ofn=streptomyces_hascds
+rm $ofn
+jobs=12
+para-hascds () {
+for job in $(seq 1 $jobs); do
+echo perl code/has_cds.pl -outfile $ofn -jobs $jobs -paraflag $job \
+-test 0 -- $(cat temp1)
+done
+}
+para-hascds
+para-hascds | parallel
+
+
+table=gbk;
+psql -U sco -d genbank -h n108377.nbi.ac.uk <<EOT
+\t
+select count(*) from $table where organism ~* '^streptomyces';
+EOT
+
+sql2csv.pl -outfile temp -dbname genbank -- "select accession from gbk where \
+organism ~* '^streptomyces';"
+-- organism ~* '^streptomyces' and level ~* 'genome|chromosome|scaffold';"
+
+ofn=strep_all_hascds
+errfn=err
+rm $ofn $errfn
+jobs=12
+para-hascds () {
+for job in $(seq 1 $jobs); do
+echo perl code/has_cds.pl -outfile $ofn -errfile $errfn -jobs $jobs -paraflag $job \
+-test 0 -- temp
+done
+}
+para-hascds
+para-hascds | parallel
+
+grep 'at least' $ofn | wc -l
+grep 'no CDS'   $ofn | wc -l
+
+
+~~~
+
+### Tue 04 Jun 2019
+
+~~~ 
+
+blastn \
+-query /home/nouser/souk/data/sven15/sven15_chr.fas \
+-db blastdb/vnz \
+-evalue 1e-3 -outfmt 6 -out sven15_vnz.blast -task blastn \
+-num_threads 12 -dust no
+
+~~~
+
+While whiH and whiI are present in all 326 complete and annotated
+Streptomyces genomes available at GenBank
+(https://www.ncbi.nlm.nih.gov/genbank/), homologs of vnz15005 are
+present in only ??%.
+
+~~~ 
+perl code/sql2csv.pl -outfile all_streps.list -dbname genbank -- \
+"select accession, organism, lineage from gbk where organism ~ '^Streptomyces'";
+
+ofn=all_streptomyces.reciblast
+rm locking_progress locking_err $ofn
+orglist=all_streps.list
+njobs=12
+para-recibl () {
+for pf in $(seq 1 $njobs); do
+ echo perl code/para_reciblast_locking.pl -paraflag ${pf} -jobs $njobs \
+ -queryfile reci_query.faa -outfile $ofn -test 0 -- $orglist
+done
+}
+para-recibl
+
+vir $ofn
+
+
+perl code/sql2csv.pl -outfile all_refrep.list -dbname genbank -- \
+"select accession, organism, lineage from gbk \
+where rscat ~* 'reference|representative'";
+~~~
+
+### Wed 05 Jun 2019
+
+vnz_27205 WhiH
+vnz_28820 WhiI
+vnz_15005
+vnz_19430 AmfC, RsiG
+
+~~~ 
+blt=all_streptomyces.reciblast
+selectRows.pl -expr '$ll[4] eq "vnz_27205"' -- $blt | wc -l
+selectRows.pl -expr '$ll[4] eq "vnz_28820"' -- $blt | wc -l
+selectRows.pl -expr '$ll[4] eq "vnz_15005"' -- $blt | wc -l
+selectRows.pl -expr '$ll[4] eq "vnz_19430"' -- $blt | wc -l
+~~~
+
+All of the above give 802.
+Below, produce .txt files for Kelley.
+
+~~~ 
+
+echo "paraflag accession organism numcontigs qname qlen hname hlen qcover hcover" > ph
+echo "fracid qgaps hgaps numhsps signif revhit reciprocal lineage" >> ph
+
+blt=all_streptomyces.reciblast
+
+ofn=whih_all_strep.txt
+perl code/print_header.pl -- ph > $ofn
+selectrows.pl -expr '$ll[4] eq "vnz_27205" and $ll[16] == 1' -- $blt >> $ofn
+echo >> $ofn
+selectrows.pl -expr '$ll[4] eq "vnz_27205" and $ll[16] == 0' -- $blt >> $ofn
+cp $ofn ~/mnt/wstemp/kelley/
+
+ofn=whii_all_strep.txt
+perl code/print_header.pl -- ph > $ofn
+selectRows.pl -expr '$ll[4] eq "vnz_28820" and $ll[16] == 1' -- $blt >> $ofn
+echo >> $ofn
+selectRows.pl -expr '$ll[4] eq "vnz_28820" and $ll[16] == 0' -- $blt >> $ofn
+cp $ofn ~/mnt/wstemp/kelley/
+
+ofn=vnz_15005_all_strep.txt
+perl code/print_header.pl -- ph > $ofn
+selectRows.pl -expr '$ll[4] eq "vnz_15005" and $ll[16] == 1' -- $blt >> $ofn
+echo >> $ofn
+selectRows.pl -expr '$ll[4] eq "vnz_15005" and $ll[16] == 0' -- $blt >> $ofn
+cp $ofn ~/mnt/wstemp/kelley/
+
+ofn=rsig_all_strep.txt
+perl code/print_header.pl -- ph > $ofn
+selectRows.pl -expr '$ll[4] eq "vnz_19430" and $ll[16] == 1' -- $blt >> $ofn
+echo >> $ofn
+selectRows.pl -expr '$ll[4] eq "vnz_19430" and $ll[16] == 0' -- $blt >> $ofn
+cp $ofn ~/mnt/wstemp/kelley/
+
+~~~
+
+The 4 .txt files produced above were emailed to Kelley.
+Now search for RsiG in all refrep.
+
+Below, WhiG search in all Streptomyces.
+
+~~~ 
+ofn=whig_all_streptomyces.reciblast
+rm locking_progress locking_err $ofn
+orglist=all_streps.list
+njobs=12
+para-recibl () {
+for pf in $(seq 1 $njobs); do
+ echo perl code/para_reciblast_locking.pl -paraflag ${pf} -jobs $njobs \
+ -queryfile whig.faa -outfile $ofn -test 0 -- $orglist
+done
+}
+para-recibl
+
+blt=whig_all_streptomyces.reciblast
+ofn=whig_all_strep.txt
+perl code/print_header.pl -- ph > $ofn
+selectRows.pl -expr '$ll[4] eq "vnz_26215" and $ll[16] == 1' -- $blt >> $ofn
+echo >> $ofn
+selectRows.pl -expr '$ll[4] eq "vnz_26215" and $ll[16] == 0' -- $blt >> $ofn
+cp $ofn ~/mnt/wstemp/kelley/
+
+~~~
+
+whig_all_strep.txt produced above was emailed to Kelley.
+
+
+Below, RsiG search in all refrep.
+
+~~~ 
+
+ofn=rsig_all_refrep.reciblast
+rm locking_progress locking_err $ofn
+orglist=all_refrep_withcds.list
+njobs=12
+para-recibl () {
+for pf in $(seq 1 $njobs); do
+ echo perl code/para_reciblast_locking.pl -paraflag ${pf} -jobs $njobs \
+ -queryfile rsig.faa -outfile $ofn -test 0 -- $orglist
+done
+}
+para-recibl
+
+
+ofn=rsig_all_refrep.txt
+perl code/print_header.pl -- ph > $ofn
+perl code/binning.pl -- rsig_all_refrep.reciblast >> $ofn
+cp $ofn ~/mnt/wstemp/kelley/
+~~~
+
+Hi Kelley,
+
+I have partitioned the results of RsiG search in all refrep into 4.
+
+1. Reciprocal hits in which the query and the hit are both covered
+70 percent or more and fraction identity is 30 percent or more.
+
+2. Reciprocal hits but not fulfilling the other criteria of 1.
+
+3. Hit which are not reciprocal.
+
+4. No hits below evalue of 0.1.
+
+These partitions are separated by blank lines in the attached file
+names rsig_all_refrep.txt. Once again, open in excel for viewing.
+
+The number of refrep genomes is 5589 of which 3963 have annotation.
+
+Cheers
+
+Govind
+
+
+
+
+
 
 
