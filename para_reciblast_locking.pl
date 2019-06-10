@@ -70,6 +70,22 @@ para_reciblast.pl
 =head2 Example
 
 Below is how you run it for 12 paraflags.
+ 
+ para-recibl () {
+ progfn=whig_progress
+ errfn=whig_err
+ ofn=rsig-whig.reciblast
+ rm $progfn $errfn $ofn
+ orglist=confirmed_rsig.list
+ njobs=12
+ for pf in $(seq 1 $njobs); do
+  echo perl code/para_reciblast_locking.pl -paraflag ${pf} -jobs $njobs \
+  -progress $progfn -errfile $errfn \
+  -queryfile whig.faa -outfile $ofn -test 3 -- $orglist
+ done
+ }
+ para-recibl
+ para-recibl | parallel
 
  rm locking_progress locking_err locking_reciblast
  orglist=all_streps.list
@@ -82,6 +98,9 @@ Below is how you run it for 12 paraflags.
  }
  para-recibl
  para-recibl | parallel
+
+
+
 
 =cut
 

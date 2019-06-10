@@ -563,8 +563,105 @@ Cheers
 Govind
 
 
+### Fri 07 Jun 2019
 
+~~~ 
+selectRows.pl -expr '$ll[6] ne "NFH"' -outfile stuff -- \
+rsig_all_refrep.reciblast
 
+selectColumns.pl -outfile stuff1 -col 14,15,16 -- stuff
 
+~~~
 
+Kelley emailed.
+
+> Hi Govind –
+> 
+> Two more things for the rsiG/whiG conservation stuff (whenever you have
+> time!). If I can help in any way with either of these, please let me know!
+> 
+> 
+> 
+>  1. Given the new list of RsiG homologs (from rep-ref genomes only), I am
+>     interested in looking at an updated list of ‘WhiGs with RsiGs’. I have
+>     attached a list of genomes that have (alignment-confirmed) rsiG
+>     homologs. Would it be possible for me to get an FAA file of reciprocal
+>     best WhiG hits in each of these 134 genomes?
+> 
+> 
+> 
+>  2. Since the list of rsiG homologs has changed slightly, I would just
+>     like to confirm the number of total annotated genomes from the search
+>     set in the following families:
+> 
+>           Family
+>      Acidimicrobiaceae
+>       Acidothermaceae
+>     Actinopolysporaceae
+>      Catenulisporaceae
+>      Cellulomonadaceae
+>      Conexibacteraceae
+>     Cryptosporangiaceae
+>     Geodermatophilaceae
+>     Ilumatobacteraceae
+>       Kineosporiaceae
+>       Nocardioidaceae
+>      Patulibacteraceae
+>     Pseudonocardiaceae
+>      Rubrobacteraceae
+>      Streptomycetaceae
+>     Thermoleophilaceae
+
+The file she attached was saved as alignment_confirmed_rsiG_homologs_list.xlsx
+then made in to alignment_confirmed_rsiG_homologs_list.csv.
+
+~~~ 
+perl code/add_accession.pl -outfile confirmed_rsig.list \
+-- alignment_confirmed_rsiG_homologs_list.csv
+
+para-recibl () {
+progfn=whig_progress
+errfn=whig_err
+ofn=rsig-whig.reciblast
+rm $progfn $errfn $ofn
+orglist=confirmed_rsig.list
+njobs=6
+for pf in $(seq 1 $njobs); do
+ echo perl code/para_reciblast_locking.pl -paraflag ${pf} -jobs $njobs \
+ -progress $progfn -errfile $errfn \
+ -queryfile whig.faa -outfile $ofn -test 0 -- $orglist
+done
+}
+para-recibl
+
+para-gbkfaa () {
+ofn=confirmed_rsig_whig.faa
+errfn=gbkltfaa.err
+ifn=rsig-whig.reciblast
+rm $ofn $errfn
+njobs=3
+for pf in $(seq 1 $njobs); do
+ echo perl code/gbk_lt_faa.pl -paraflag ${pf} -jobs $njobs \
+ -test 0 -errfile $errfn -outfile $ofn -reciprocal -- $ifn
+done
+}
+para-gbkfaa | parallel
+
+famcnt () {
+for family in Acidimicrobiaceae Acidothermaceae Actinopolysporaceae \
+Catenulisporaceae Cellulomonadaceae Conexibacteraceae Cryptosporangiaceae \
+Geodermatophilaceae Ilumatobacteraceae Kineosporiaceae Nocardioidaceae \
+Patulibacteraceae Pseudonocardiaceae Rubrobacteraceae Streptomycetaceae \
+Thermoleophilaceae; do
+echo $family
+grep $family all_refrep_withcds.list | wc -l
+done
+}
+
+famcnt > counts_for_families.txt
+
+~~~
+
+Files counts_for_families.txt and confirmed_rsig_whig.faa were emailed
+to Kelley.
 
